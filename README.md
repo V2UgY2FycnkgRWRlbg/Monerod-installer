@@ -1,4 +1,4 @@
-# Monero-miner-installer
+# Monerod-installer
 
 <img width="2040" height="2056" alt="image" src="https://github.com/user-attachments/assets/30c42503-7d96-4342-80bd-471e1df2a7ce" />
 
