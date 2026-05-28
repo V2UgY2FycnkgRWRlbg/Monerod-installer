@@ -1,92 +1,228 @@
 # Monerod-installer
 
-<img width="2040" height="2056" alt="image" src="https://github.com/user-attachments/assets/30c42503-7d96-4342-80bd-471e1df2a7ce" />
+OpenTofu/Terraform deployment for a Monero mining container on Incus.
 
+The default setup is now the practical mining path:
 
-````markdown
-# Monero Solo Mining Container on Incus (OpenTofu/Terraform)
+```text
+XMRig -> centralized Monero pool
+```
 
-This project provisions a **Debian 12 cloud container** on **Incus** and turns it into a **self-contained Monero full node + solo miner** using **Monero CLI (monerod)**. Everything is defined as code with **OpenTofu/Terraform**, making the setup reproducible and easy to redeploy.
+This avoids waiting for a full blockchain sync and gives smaller, more regular payouts than solo mining.
 
-## What this does
+## Which Mode Should You Choose?
 
-When you apply this configuration, it will:
+### Recommended: `mining_mode = "pool"`
 
-1. **Create an Incus container** from `images:debian/12/cloud`
-2. **Pin CPU cores** and **limit memory** for predictable performance and isolation
-3. **Download and verify Monero CLI**:
-   - Imports the official `binaryFate` signing key
-   - Verifies the signed `hashes.txt`
-   - Downloads the latest Monero CLI tarball (`linux64`) and checks its SHA256 hash
-4. **Install `monerod`** under `/opt/monero` and symlink it to `/usr/local/bin/monerod`
-5. **Install systemd services**:
-   - `monerod.service` runs the Monero daemon (full node)
-   - `monero-solo-mining.service` triggers solo mining via RPC using your wallet address and **4 threads**
-6. **Autostart on boot**
-7. Logs provisioning output to `/var/log/monero-provision.log`
+Use this if your goal is simple, frequent, visible payouts.
 
-## Technologies used
+```text
+XMRig -> supportxmr.com / hashvault.pro / nanopool.org / another pool
+```
 
-- **Incus**: system container manager (LXD-compatible ecosystem) used to run the Debian container.
-- **OpenTofu / Terraform**: Infrastructure-as-Code to define and deploy the container and its configuration.
-- **Cloud-init (NoCloud)**: used to bootstrap the container (packages, scripts, systemd units).
-- **systemd**: service manager inside the container to run `monerod` and start mining automatically.
-- **GPG (gnupg)**: verifies Monero release authenticity (signed hash list + trusted signer fingerprint).
-- **Monero CLI**: official Monero binaries (specifically `monerod`) used for full node operation and mining.
+You only need:
 
-## Prerequisites
+- your Monero wallet address
+- a pool endpoint
+- CPU threads to mine with
 
-- Incus installed and configured on the host
-- OpenTofu or Terraform installed (`tofu` or `terraform`)
-- Working Incus image remotes (`images:`) and access to `images:debian/12/cloud`
+Good default:
 
-## Configuration variables
+```bash
+tofu apply \
+  -var="wallet_address=YOUR_XMR_ADDRESS_HERE" \
+  -var="mining_mode=pool" \
+  -var="pool_url=pool.supportxmr.com:3333" \
+  -var="pool_password=worker1"
+```
 
-### `wallet_address` (required)
-Monero address that will receive block rewards (solo mining).  
-You must set it; the plan will fail if left at the placeholder value.
+Other example pool endpoints:
+
+```text
+pool.supportxmr.com:3333
+pool.hashvault.pro:443
+xmr-eu1.nanopool.org:14433
+```
+
+Always confirm the correct hostname, port, TLS requirement, payout minimum, and password format on the pool's own website before deploying.
+
+### Available but not recommended for steady payouts: `mining_mode = "solo"`
+
+Use this if you specifically want to run your own node and mine alone.
+
+```text
+monerod -> Monero network
+```
+
+Solo mining is a lottery. With normal home CPU hashrate, it may take a very long time to find a block.
+
+```bash
+tofu apply \
+  -var="wallet_address=YOUR_XMR_ADDRESS_HERE" \
+  -var="mining_mode=solo"
+```
+
+This mode installs verified Monero CLI binaries, runs `monerod`, waits for full sync, then starts solo mining through the daemon RPC.
+
+### Decentralized pool option: P2Pool
+
+The best Monero-aligned pool setup is:
+
+```text
+XMRig -> P2Pool -> monerod -> Monero network
+```
+
+That gives pool-like payouts without a centralized pool operator. This repository does not deploy P2Pool yet; the current automated choices are direct pool mining or solo mining.
+
+## What This Deploys
+
+When `mining_mode = "pool"`:
+
+1. Creates an Incus Debian 12 cloud container.
+2. Pins CPU cores and limits memory.
+3. Downloads the latest upstream Linux static XMRig release.
+4. Installs `/usr/local/bin/xmrig`.
+5. Starts `xmrig.service`.
+6. Mines directly to the configured pool.
+
+When `mining_mode = "solo"`:
+
+1. Creates an Incus Debian 12 cloud container.
+2. Pins CPU cores and limits memory.
+3. Downloads and verifies Monero CLI:
+   - imports the official `binaryFate` signing key
+   - verifies the signed `hashes.txt`
+   - downloads the latest Linux x64 CLI tarball
+   - checks the SHA256 hash
+4. Installs `monerod`.
+5. Starts `monerod.service`.
+6. Waits for sync, then starts solo mining with `monero-solo-mining.service`.
+
+## Variables
+
+### `mining_mode`
+
+Default: `pool`
+
+Allowed values:
+
+- `pool`: direct XMRig pool mining, recommended
+- `solo`: monerod full-node solo mining
+
+### `wallet_address`
+
+Required. Your Monero address for pool payouts or solo block rewards.
+
+### `pool_url`
+
+Default: `pool.supportxmr.com:3333`
+
+Only used in `pool` mode. This is the pool stratum endpoint passed to XMRig.
+
+### `pool_password`
+
+Default: `monero-miner`
+
+Only used in `pool` mode. Many pools use this as the worker name, but some pools use it for options such as email, rig ID, TLS flags, or payout settings. Check the pool documentation.
+
+### `pool_tls`
+
+Default: `false`
+
+Only used in `pool` mode. Set this to `true` when the pool endpoint requires TLS, which is common on ports such as `443`.
+
+### `mining_threads`
+
+Default: `4`
+
+CPU mining threads for XMRig pool mining or monerod solo mining.
+
+### `xmrig_donate_level`
+
+Default: `1`
+
+XMRig developer donation level percentage.
 
 ### `cpu_set`
-Logical CPUs pinned to the container (example: `2,3,6,7` = two full physical cores on an i7-4770).
+
+Default: `2,3,6,7`
+
+Logical CPUs pinned to the container.
 
 ### `memory`
-Container memory limit (example: `6GiB`).
 
-## How to use
+Default: `6GiB`
 
-1. Put the `.tf` file in a directory.
-2. Set your wallet address (recommended via CLI rather than editing the file):
+Container memory limit.
+
+## Usage
 
 ```bash
 tofu init
 tofu apply -var="wallet_address=YOUR_XMR_ADDRESS_HERE"
-````
+```
 
-(Use `terraform` instead of `tofu` if you prefer Terraform.)
+That deploys the default pool-mining setup using `pool.supportxmr.com:3333`.
 
-## What to expect after deployment
+To choose a different pool:
 
-* `monerod` starts immediately and begins syncing the blockchain.
-* **Solo mining will only start once the node is synchronized**.
+```bash
+tofu apply \
+  -var="wallet_address=YOUR_XMR_ADDRESS_HERE" \
+  -var="pool_url=pool.hashvault.pro:443" \
+  -var="pool_tls=true" \
+  -var="pool_password=worker1"
+```
 
-  * While syncing, `/start_mining` may return `BUSY` or mining will remain inactive.
-  * This is expected behavior: mining effectively requires a synced node.
+Use `terraform` instead of `tofu` if you prefer Terraform.
 
-## Verification / health checks
+## Pool Terms
 
-### 1) Check cloud-init status
+`PPLNS`: common Monero pool payout method. Best for miners who stay connected. Payouts depend on your shares in the recent window when the pool finds blocks.
+
+`PPS+`: more predictable payouts, often with higher fees because the pool takes more risk.
+
+`PROP`: proportional payout for the current round. Usually less attractive than PPLNS for steady mining.
+
+`SOLO`: pool infrastructure, but you only get paid if your miner finds a block. Avoid this for regular payouts.
+
+`+ XTM`: the pool may support merge-mining Tari/XTM while mining Monero.
+
+`0.6%`, `1%`, etc: pool fee.
+
+`GH/s`, `MH/s`, `KH/s`: total pool hashrate. Larger pools find blocks more often, but too much hashrate on one pool is worse for Monero decentralization.
+
+## Verification
+
+### Check cloud-init
 
 ```bash
 incus exec monero-miner -- cloud-init status --long
 ```
 
-### 2) Check Monero daemon service
+### Check provisioning logs
+
+```bash
+incus exec monero-miner -- sudo tail -n 200 /var/log/monero-provision.log
+```
+
+### Pool mode: check XMRig
+
+```bash
+incus exec monero-miner -- sudo systemctl status xmrig --no-pager -l
+```
+
+```bash
+incus exec monero-miner -- sudo journalctl -u xmrig -n 100 --no-pager
+```
+
+You should see accepted shares after the miner connects and starts working.
+
+### Solo mode: check monerod
 
 ```bash
 incus exec monero-miner -- sudo systemctl status monerod --no-pager -l
 ```
-
-### 3) Check sync progress via RPC
 
 ```bash
 incus exec monero-miner -- bash -lc \
@@ -95,67 +231,21 @@ incus exec monero-miner -- bash -lc \
 
 You want to eventually see:
 
-* `"synchronized": true`
+```text
+"synchronized": true
+```
 
-### 4) Check mining status
+### Solo mode: check mining status
 
 ```bash
 incus exec monero-miner -- bash -lc \
 'curl -s http://127.0.0.1:18081/mining_status | egrep "\"active\"|\"threads_count\"|\"address\"|\"speed\"|\"status\""'
 ```
-or you can directly go though the container by :
-```
-incus shell monero-miner
-monerod status
-monerod mining_status
-```
 
+## Security Notes
 
-Once synced and mining started successfully, you should see:
+- In pool mode, XMRig is downloaded from the upstream GitHub release. This is convenient, but it is not verified as strongly as the Monero CLI path.
+- In solo mode, Monero CLI binaries are verified with the `binaryFate` signer fingerprint, signed hash list, and SHA256 check.
+- No RPC port is exposed outside the container by default.
 
-* `"active": true`
-* `"threads_count": 4`
-* `"address": "<your wallet address>"`
-* `"speed": <non-zero>`
-
-### 5) Provisioning logs
-
-```bash
-incus exec monero-miner -- sudo tail -n 200 /var/log/monero-provision.log
-```
-
-## Notes / operational considerations
-
-* **Solo mining is probabilistic** (“lottery”): with low hashrate it may take a very long time to find a block.
-* Blockchain sync can take significant time and disk space.
-* CPU pinning helps avoid interfering with other workloads on the host.
-* This setup binds the Monero RPC to `127.0.0.1` **inside the container**, reducing exposure.
-
-## Security
-
-* The Monero binaries are verified using:
-
-  * a hard-checked signer fingerprint
-  * a signed `hashes.txt` file
-  * SHA256 hash verification of the downloaded tarball
-* RPC is not exposed outside the container unless you explicitly change configuration.
-
-If you looking to get the best anonymity possible while running a node you can follow this guide to set-up proxies : https://monero.fail/opsec
-
-## Troubleshooting quick tips
-
-* If mining shows inactive:
-
-  * verify the node is fully synced (`synchronized: true`)
-  * check `monero-solo-mining.service` logs:
-
-    ```bash
-    incus exec monero-miner -- sudo journalctl -u monero-solo-mining -n 200 --no-pager
-    ```
-
-* If `monerod` is not running:
-
-  ```bash
-  incus exec monero-miner -- sudo systemctl restart monerod
-  incus exec monero-miner -- sudo journalctl -u monerod -n 200 --no-pager
-  ```
+For stronger anonymity while running a node, see: https://monero.fail/opsec
