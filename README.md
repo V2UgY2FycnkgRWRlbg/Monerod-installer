@@ -135,7 +135,7 @@ Only used in `pool` mode. Set this to `true` when the pool endpoint requires TLS
 
 Default: `4`
 
-CPU mining threads for XMRig pool mining or monerod solo mining.
+CPU mining threads for XMRig pool mining or monerod solo mining. This is how many mining workers the miner starts inside the container.
 
 ### `xmrig_donate_level`
 
@@ -147,13 +147,124 @@ XMRig developer donation level percentage.
 
 Default: `2,3,6,7`
 
-Logical CPUs pinned to the container.
+Logical CPUs that the Incus container is allowed to use.
 
 ### `memory`
 
 Default: `6GiB`
 
 Container memory limit.
+
+## Choosing CPU And Memory
+
+There are three separate knobs:
+
+`cpu_set` controls which host CPU threads the container may use.
+
+`mining_threads` controls how many mining threads XMRig or monerod starts.
+
+`memory` controls the maximum RAM the container can use.
+
+### `cpu_set`
+
+`cpu_set` is an Incus CPU pinning setting. It limits the container to specific logical CPUs from the host.
+
+Example:
+
+```bash
+-var="cpu_set=2,3,6,7"
+```
+
+This means the container can only run on logical CPUs `2`, `3`, `6`, and `7`.
+
+To see your host CPU layout:
+
+```bash
+lscpu -e
+```
+
+Useful examples:
+
+```text
+cpu_set=2,3       light mining, leaves most of the machine free
+cpu_set=2,3,6,7   balanced default, often two physical cores with hyperthreads
+cpu_set=0-7       aggressive, allows use of eight logical CPUs
+```
+
+For a desktop or server doing other work, do not give the miner every CPU. Leave at least one or two cores free for the host.
+
+### `mining_threads`
+
+`mining_threads` should usually be less than or equal to the number of logical CPUs in `cpu_set`.
+
+Example:
+
+```bash
+-var="cpu_set=2,3,6,7" \
+-var="mining_threads=4"
+```
+
+That allows four logical CPUs and starts four mining threads.
+
+Rule of thumb:
+
+```text
+mining_threads <= CPUs listed in cpu_set
+```
+
+For Monero RandomX, physical cores usually matter more than hyperthreads. On a CPU with 4 physical cores and 8 logical threads, start with `mining_threads=4`, then test `6` or `8` only if temperatures and responsiveness are acceptable.
+
+If the machine becomes slow, reduce `mining_threads` first.
+
+### `memory`
+
+`memory` is the container RAM limit.
+
+Pool mining with XMRig does not need the full Monero blockchain, so it needs much less memory than solo mining. RandomX still benefits from having enough RAM available.
+
+Recommended starting points:
+
+```text
+Pool mining, light:      memory=4GiB
+Pool mining, balanced:   memory=6GiB
+Solo monerod mining:     memory=6GiB or more
+```
+
+If the container is killed, XMRig crashes, or the host logs show out-of-memory errors, increase `memory`.
+
+### Example Profiles
+
+Light profile:
+
+```bash
+tofu apply \
+  -var="wallet_address=YOUR_XMR_ADDRESS_HERE" \
+  -var="cpu_set=2,3" \
+  -var="mining_threads=2" \
+  -var="memory=4GiB"
+```
+
+Balanced profile:
+
+```bash
+tofu apply \
+  -var="wallet_address=YOUR_XMR_ADDRESS_HERE" \
+  -var="cpu_set=2,3,6,7" \
+  -var="mining_threads=4" \
+  -var="memory=6GiB"
+```
+
+Aggressive profile:
+
+```bash
+tofu apply \
+  -var="wallet_address=YOUR_XMR_ADDRESS_HERE" \
+  -var="cpu_set=0-7" \
+  -var="mining_threads=6" \
+  -var="memory=6GiB"
+```
+
+Use the aggressive profile only if the machine is dedicated to mining or you are comfortable with higher CPU usage, heat, fan noise, and power consumption.
 
 ## Usage
 
