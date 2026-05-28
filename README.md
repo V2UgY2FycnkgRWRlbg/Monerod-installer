@@ -329,6 +329,52 @@ incus exec monero-miner -- sudo journalctl -u xmrig -n 100 --no-pager
 
 You should see accepted shares after the miner connects and starts working.
 
+### Pool mode: check HashVault earnings from command line
+
+If you mine on HashVault, you can query your pool stats directly from the container.
+
+Raw API output:
+
+```bash
+WALLET=$(ps -o args= -C xmrig | sed -n 's/.*--user \([^ ]*\).*/\1/p')
+
+curl -s "https://api.hashvault.pro/v3/monero/wallet/$WALLET/stats"
+```
+
+Readable output with `jq`:
+
+```bash
+WALLET=$(ps -o args= -C xmrig | sed -n 's/.*--user \([^ ]*\).*/\1/p')
+
+curl -s "https://api.hashvault.pro/v3/monero/wallet/$WALLET/stats" | jq '{
+  hashrate_hs: .collective.hashRate,
+  valid_shares: .collective.validShares,
+  invalid_shares: .collective.invalidShares,
+  confirmed_xmr: (.revenue.confirmedBalance / 1000000000000),
+  unconfirmed_xmr: (.revenue.unconfirmedBalance.collective.total / 1000000000000),
+  paid_xmr: (.revenue.totalPaid / 1000000000000),
+  payout_threshold_xmr: (.revenue.payoutThreshold / 1000000000000)
+}'
+```
+
+Field meanings:
+
+```text
+confirmed_xmr       balance ready for payout
+unconfirmed_xmr     mined reward not mature yet
+paid_xmr            already paid to your wallet
+payout_threshold    minimum balance before the pool sends payment
+valid_shares        accepted mining work
+invalid_shares      rejected mining work
+```
+
+If `jq` is not installed:
+
+```bash
+apt update
+apt install -y jq
+```
+
 ### Solo mode: check monerod
 
 ```bash
