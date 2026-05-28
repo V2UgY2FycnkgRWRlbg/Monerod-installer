@@ -1,4 +1,4 @@
-# Monerod-installer
+# Monero-installer
 
 OpenTofu/Terraform deployment for a Monero mining container on Incus.
 
