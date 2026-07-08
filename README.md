@@ -406,3 +406,150 @@ incus exec monero-miner -- bash -lc \
 - No RPC port is exposed outside the container by default.
 
 For stronger anonymity while running a node, see: https://monero.fail/opsec
+
+## Fix XMRig DNS Error in an Incus Container
+
+### Problem
+
+XMRig starts, but logs show:
+
+```text
+DNS error: "unknown node or service"
+```
+
+Example:
+
+```text
+pool.example.com:443 DNS error: "unknown node or service"
+```
+
+The service may still look active:
+
+```bash
+systemctl status xmrig --no-pager
+```
+
+### 1. Confirm TLS for Port 443
+
+If the pool uses port `443`, XMRig usually needs TLS.
+
+Check the start script:
+
+```bash
+cat /usr/local/sbin/xmrig-start.sh
+```
+
+The XMRig command should include:
+
+```bash
+--tls
+```
+
+Example:
+
+```bash
+exec /usr/local/bin/xmrig \
+  --coin monero \
+  --url pool.example.com:443 \
+  --user YOUR_WALLET_ADDRESS \
+  --pass worker-name \
+  --threads 4 \
+  --donate-level 1 \
+  --tls
+```
+
+Restart after changes:
+
+```bash
+systemctl daemon-reload
+systemctl restart xmrig
+```
+
+### 2. Test DNS and Pool Access
+
+Inside the container:
+
+```bash
+getent hosts pool.example.com
+getent hosts google.com
+ping -c 3 1.1.1.1
+```
+
+Install netcat and test the pool port:
+
+```bash
+apt update
+apt install -y netcat-openbsd
+nc -vz pool.example.com 443
+```
+
+If `nc` succeeds but XMRig still shows DNS errors, XMRig is failing to resolve the hostname even though the container network works.
+
+#### 3. Fix with `/etc/hosts`
+
+Stop XMRig:
+
+```bash
+systemctl stop xmrig
+```
+
+Remove old pool entries:
+
+```bash
+sed -i '/pool.example.com/d' /etc/hosts
+```
+
+Add the pool IP manually:
+
+```bash
+echo "203.0.113.10 pool.example.com" >> /etc/hosts
+```
+
+Replace `203.0.113.10` with the IP returned by:
+
+```bash
+getent hosts pool.example.com
+```
+
+Verify:
+
+```bash
+getent hosts pool.example.com
+```
+
+Restart XMRig:
+
+```bash
+systemctl restart xmrig
+journalctl -u xmrig -n 80 --no-pager
+```
+
+#### 4. Confirm It Is Mining
+
+Watch logs:
+
+```bash
+journalctl -u xmrig -f
+```
+
+Good signs:
+
+```text
+login succeeded
+new job
+accepted
+speed
+```
+
+Bad signs:
+
+```text
+DNS error
+connection failed
+tls handshake failed
+login failed
+```
+
+#### 5. Note
+
+The pool IP can change later. If mining stops, refresh `/etc/hosts`:
